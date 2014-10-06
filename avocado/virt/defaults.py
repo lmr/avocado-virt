@@ -47,3 +47,9 @@ guest_password = '123456'
 
 disable_restore_image_test = False
 disable_restore_image_job = False
+
+qemu_template = """
+{qemu_bin}
+{avocado_defaults}
+{avocado_migration}
+"""

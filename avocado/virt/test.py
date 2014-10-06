@@ -39,6 +39,10 @@ class VirtTest(test.Test):
             params['avocado.args.run.guest_user'] = job.args.guest_user
         if job.args.guest_password:
             params['avocado.args.run.guest_password'] = job.args.guest_password
+        if job.args.qemu_template is not None:
+            params['avocado.args.run.qemu_template'] = job.args.qemu_template.read()
+        else:
+            params['avocado.args.run.qemu_template'] = defaults.qemu_template
 
         params['avocado.args.run.guest_image_restore_test'] = not job.args.disable_restore_image_test
 

@@ -17,6 +17,8 @@
 # Author: Lucas Meneghel Rodrigues <lmr@redhat.com>
 # Author: Stefan Hajnoczi <stefanha@redhat.com>
 
+import logging
+
 from avocado.utils import network
 from avocado.virt import defaults
 from avocado.virt.qemu import path
@@ -24,18 +26,54 @@ from avocado.virt.qemu import path
 
 class QemuDevices(object):
 
-    def __init__(self, params=None):
+    def __init__(self, params=None, logger=None):
         self.params = params
         self.qemu_bin = path.get_qemu_binary(params)
         self.redir_port = None
-        self._args = [self.qemu_bin]
+        self._args = {'qemu_bin': self.qemu_bin}
         self._op_record = []
+        self.log = logger
 
-    def add_args(self, *args):
-        self._args.extend(args)
+    def add_args(self, key, *args):
+        self._args[key] = ' '.join(args)
+
+    def _fix_template(self, tmpl, key):
+        tmpl = tmpl.replace('{%s}' % key, '')
+        return tmpl
 
     def get_cmdline(self):
-        return ' '.join(self._args)
+        values = ''
+        for k in ('avocado_qmp_default',
+                  'avocado_display_default',
+                  'avocado_vga_default',
+                  'avocado_drive_default',
+                  'avocado_net_default',
+                  'avocado_serial_default'):
+            values += ' ' + self._args.get(k, '')
+        defaults = {'avocado_defaults': values}
+        self._args.update(defaults)
+
+        values = ''
+        for k in ('incoming', ):
+            values += ' ' + self._args.get(k, '')
+        migration = {'avocado_migration': values}
+        self._args.update(migration)
+
+        tmpl = self.params.get('avocado.args.run.qemu_template')
+        clean = False
+        while not clean:
+            try:
+                cmd_line = tmpl.format(**self._args)
+            except KeyError, e:
+                if self.log:
+                    self.log('From template, could not find defined values for {%s}' %
+                             e.args[0])
+                tmpl = self._fix_template(tmpl, e.args[0])
+            else:
+                clean = True
+        cmd_line = cmd_line.splitlines()
+        cmd_line = ' '.join(cmd_line)
+        return cmd_line
 
     def clone(self, params=None):
         new_devices = QemuDevices(params)
@@ -51,20 +89,20 @@ class QemuDevices(object):
         if opts:
             options.append(opts)
 
-        self.add_args('-add-fd', ','.join(options))
+        self.add_args('avocado_fd_default', '-add-fd', ','.join(options))
 
     def add_qmp_monitor(self, monitor_socket):
-        self.add_args('-chardev',
+        self.add_args('avocado_qmp_default', '-chardev',
                       'socket,id=mon,path=%s' % monitor_socket,
                       '-mon', 'chardev=mon,mode=control')
 
     def add_display(self, value='none'):
         self._op_record.append(['add_display', {'value': value}])
-        self.add_args('-display', value)
+        self.add_args('avocado_display_default', '-display', value)
 
     def add_vga(self, value='none'):
         self._op_record.append(['add_vga', {'value': value}])
-        self.add_args('-vga', value)
+        self.add_args('avocado_vga_default', '-vga', value)
 
     def add_drive(self, drive_file=None, device_type='virtio-blk-pci',
                   device_id='avocado_image', drive_id='device_avocado_image'):
@@ -86,7 +124,7 @@ class QemuDevices(object):
                                               'device_type': device_type,
                                               'device_id': device_id,
                                               'drive_id': drive_id}])
-        self.add_args('-drive',
+        self.add_args('avocado_drive_default', '-drive',
                       'id=%s,if=none,file=%s' %
                       (drive_id, drive_file),
                       '-device %s,id=%s,drive=%s' %
@@ -99,11 +137,13 @@ class QemuDevices(object):
                                             'device_id': device_id,
                                             'nic_id': nic_id}])
         self.redir_port = network.find_free_port(5000, 6000)
-        self.add_args('-device %s,id=%s,netdev=%s' %
+        self.add_args('avocado_net_default', '-device %s,id=%s,netdev=%s' %
                       (device_type, device_id, nic_id),
                       '-netdev %s,id=%s,hostfwd=tcp::%s-:22' %
                       (netdev_type, nic_id, self.redir_port))
 
     def add_serial(self, serial_socket, device_id='avocado_serial'):
-        self.add_args('-chardev socket,id=%s,path=%s,server,nowait' % (device_id, serial_socket))
-        self.add_args('-device isa-serial,chardev=%s' % (device_id))
+        self.add_args('avocado_serial_default', '-chardev socket,id=%s,path=%s,server,nowait' %
+                      (device_id, serial_socket),
+                      '-device isa-serial,chardev=%s' %
+                      (device_id))

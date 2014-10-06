@@ -18,6 +18,8 @@ Virtualization testing plugin.
 
 import os
 
+from argparse import FileType
+
 from avocado.core import output
 from avocado.utils import process
 from avocado.plugins import plugin
@@ -77,6 +79,9 @@ class VirtOptions(plugin.Plugin):
             default=defaults.disable_restore_image_job,
             help=('Do not restore the guest image before a test job '
                   'starts. Default: %s' % defaults.disable_restore_image_job))
+        virt_parser.add_argument(
+            '--qemu-template', nargs='?', type=FileType('r'),
+            help='Create qemu command line from a template')
 
         self.configured = True
 

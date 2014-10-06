@@ -44,7 +44,7 @@ class VM(object):
     def __init__(self, params=None):
         self._popen = None
         self.params = params
-        self.devices = devices.QemuDevices(params)
+        self.devices = devices.QemuDevices(params, logger=self.log)
         self.logged = False
         self.remote = None
         self.uuid = uuid.uuid4()
@@ -170,7 +170,7 @@ class VM(object):
         while not network.is_port_free(migration_port, 'localhost'):
             migration_port += 1
         incoming_args = " -incoming %s:0:%d" % (migration_mode, migration_port)
-        clone.devices.add_args(incoming_args)
+        clone.devices.add_args('incoming', incoming_args)
         clone.power_on()
         uri = "%s:localhost:%d" % (migration_mode, migration_port)
         self.qmp("migrate", uri=uri)
