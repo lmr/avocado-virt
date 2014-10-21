@@ -187,3 +187,16 @@ class VM(object):
         old_vm.__dict__ = self.__dict__
         self.__dict__ = clone.__dict__
         old_vm.power_off()
+
+    def screendump(self, filename):
+        """
+        Save a screendump on a given destination.
+
+        It is important to note that QEMU saves screendumps using the PPM
+        format.
+
+        :see: http://en.wikipedia.org/wiki/Netpbm_format
+
+        :param filename: Path with the screendump destination.
+        """
+        self.qmp('screendump', filename=filename)
