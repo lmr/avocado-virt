@@ -35,6 +35,7 @@ from avocado.virt.qemu import monitor
 from avocado.virt.qemu import devices
 from avocado.virt.qemu import path
 from avocado.virt.utils import image
+from avocado.virt.utils import video_maker
 
 log = logging.getLogger("avocado.test")
 
@@ -60,6 +61,9 @@ class VM(object):
         self._screendump_terminate = threading.Event()
         self._screendump_thread = threading.Thread(target=self._take_screendumps,
                                                    name='VmScreendumps')
+        self.screendump_dir = utils_path.init_dir(os.path.join(self.logdir,
+                                                               'screendumps',
+                                                               self.short_id))
 
     def __str__(self):
         return 'QEMU VM (%s)' % self.short_id
@@ -96,7 +100,7 @@ class VM(object):
         if self._popen is not None:
             self._qmp.cmd('quit')
             self._popen.wait()
-            self._screendump_terminate.set()
+            self._process_screendumps()
             self._popen = None
             self.log('Shut down')
 
@@ -191,7 +195,7 @@ class VM(object):
         clone_params['qemu_bin'] = path.get_qemu_dst_binary(clone_params)
         clone = self.clone(params=clone_params, preserve_uuid=True)
         migration_port = clone.devices.add_incoming(protocol)
-        self._screendump_terminate.set()
+        self._process_screendumps()
         clone.power_on()
         uri = "%s:localhost:%d" % (protocol, migration_port)
         self.qmp("migrate", uri=uri)
@@ -227,10 +231,7 @@ class VM(object):
         """
         timeout = self.params.get('screendump_thread_timeout', 2)
         quality = self.params.get('screendump_thread_quality', 70)
-        screendump_dir = utils_path.init_dir(os.path.join(self.logdir,
-                                                          'screendumps',
-                                                          self.short_id))
-        dump_list = sorted(os.listdir(screendump_dir))
+        dump_list = sorted(os.listdir(self.screendump_dir))
         if dump_list:
             last_dump = dump_list[-1].split('.')[0]
             s_index = int(last_dump.split('-')[-1]) + 1
@@ -239,9 +240,9 @@ class VM(object):
 
         while True:
             s_ppm_basename = '%04d.ppm' % s_index
-            ppm_filename = os.path.join(screendump_dir, s_ppm_basename)
+            ppm_filename = os.path.join(self.screendump_dir, s_ppm_basename)
             s_jpg_basename = '%04d.jpg' % s_index
-            jpg_filename = os.path.join(screendump_dir, s_jpg_basename)
+            jpg_filename = os.path.join(self.screendump_dir, s_jpg_basename)
 
             self.screendump(filename=ppm_filename)
 
@@ -259,3 +260,12 @@ class VM(object):
                 break
             else:
                 self._screendump_terminate.wait(timeout=timeout)
+
+    def _encode_video(self):
+        encoder = video_maker.VideoMaker(verbose=True)
+        video_file = os.path.join(self.logdir, '%s.webm' % self.short_id)
+        encoder.encode(self.screendump_dir, video_file)
+
+    def _process_screendumps(self):
+        self._screendump_terminate.set()
+        self._encode_video()
