@@ -19,6 +19,8 @@ import string
 import logging
 import tempfile
 import uuid
+import threading
+from PIL import Image
 
 from avocado.core import exceptions
 from avocado import aexpect
@@ -27,10 +29,12 @@ from avocado.utils import network
 from avocado.utils import process
 from avocado.utils import remote
 from avocado.utils import wait
+from avocado.utils import path as utils_path
 
 from avocado.virt.qemu import monitor
 from avocado.virt.qemu import devices
 from avocado.virt.qemu import path
+from avocado.virt.utils import image
 
 log = logging.getLogger("avocado.test")
 
@@ -50,6 +54,10 @@ class VM(object):
         self.uuid = uuid.uuid4()
         self.short_id = str(self.uuid)[:8]
         self.logdir = logdir
+        self.screendump_dir = None
+        self._screendump_thread_enable = False
+        self._screendump_terminate = None
+        self._screendump_thread = None
 
     def __str__(self):
         return 'QEMU VM (%s)' % self.short_id
@@ -78,6 +86,7 @@ class VM(object):
                 output_func=io.log_line,
                 output_params=("serial-console-%s.log" % self.short_id,),
                 prompt=self.params.get("shell_prompt", "[\#\$]"))
+            self._screendump_thread_start()
         finally:
             os.remove(self.monitor_socket)
 
@@ -85,6 +94,7 @@ class VM(object):
         if self._popen is not None:
             self._qmp.cmd('quit')
             self._popen.wait()
+            self._screendump_thread_terminate()
             self._popen = None
             self.log('Shut down')
 
@@ -175,6 +185,7 @@ class VM(object):
             migration_port += 1
         incoming_args = " -incoming %s:0:%d" % (migration_mode, migration_port)
         clone.devices.add_args(incoming_args)
+        self._screendump_thread_terminate()
         clone.power_on()
         uri = "%s:localhost:%d" % (migration_mode, migration_port)
         self.qmp("migrate", uri=uri)
@@ -206,3 +217,57 @@ class VM(object):
                         such as the screendump thread).
         """
         self.qmp(cmd='screendump', verbose=verbose, filename=filename)
+
+    def _screendump_thread_start(self):
+        self.screendump_dir = utils_path.init_dir(os.path.join(self.logdir,
+                                                               'screendumps',
+                                                               self.short_id))
+        thread_enable = 'avocado.args.virt.screendump_thread_enable'
+        self._screendump_thread_enable = self.params.get(thread_enable, True)
+        if self._screendump_thread_enable:
+            self._screendump_terminate = threading.Event()
+            self._screendump_thread = threading.Thread(target=self._take_screendumps,
+                                                       name='VmScreendumps')
+            self._screendump_thread.start()
+
+    def _take_screendumps(self):
+        """
+        Take screendumps on regular intervals.
+        """
+        timeout = self.params.get('avocado.args.virt.screendump_thread_timeout',
+                                  0.5)
+        quality = self.params.get('avocado.args.virt.screendump_thread_quality',
+                                  95)
+        dump_list = sorted(os.listdir(self.screendump_dir))
+        if dump_list:
+            last_dump = dump_list[-1].split('.')[0]
+            s_index = int(last_dump.split('-')[-1]) + 1
+        else:
+            s_index = 1
+
+        while True:
+            s_ppm_basename = '%04d.ppm' % s_index
+            ppm_filename = os.path.join(self.screendump_dir, s_ppm_basename)
+            s_jpg_basename = '%04d.jpg' % s_index
+            jpg_filename = os.path.join(self.screendump_dir, s_jpg_basename)
+
+            self.screendump(filename=ppm_filename, verbose=False)
+
+            if os.path.isfile(ppm_filename):
+                if image.is_ppm(ppm_filename):
+                    img = Image.open(ppm_filename)
+                    img.save(jpg_filename, format="JPEG", quality=quality)
+                    s_index += 1
+                else:
+                    self.log("Produced screendump %s is invalid" % ppm_filename)
+                os.unlink(ppm_filename)
+
+            if self._screendump_terminate.isSet():
+                self._screendump_terminate.clear()
+                break
+            else:
+                self._screendump_terminate.wait(timeout=timeout)
+
+    def _screendump_thread_terminate(self):
+        if self._screendump_thread_enable:
+            self._screendump_terminate.set()
