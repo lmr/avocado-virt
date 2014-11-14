@@ -35,6 +35,7 @@ from avocado.virt.qemu import monitor
 from avocado.virt.qemu import devices
 from avocado.virt.qemu import path
 from avocado.virt.utils import image
+from avocado.virt.utils import video
 
 log = logging.getLogger("avocado.test")
 
@@ -93,11 +94,11 @@ class VM(object):
         finally:
             os.remove(self.monitor_socket)
 
-    def power_off(self):
+    def power_off(self, migrate=False):
         if self._popen is not None:
             self._qmp.cmd('quit')
             self._popen.wait()
-            self._screendump_thread_terminate()
+            self._screendump_thread_terminate(migrate=migrate)
             self._popen = None
             self.log('Shut down')
 
@@ -194,7 +195,7 @@ class VM(object):
         clone_params['qemu_bin'] = path.get_qemu_dst_binary(clone_params)
         clone = self.clone(params=clone_params, preserve_uuid=True)
         migration_port = clone.devices.add_incoming(protocol)
-        self._screendump_thread_terminate()
+        self._screendump_thread_terminate(migrate=True)
         clone.power_on()
         uri = "%s:localhost:%d" % (protocol, migration_port)
         self.qmp("migrate", uri=uri)
@@ -209,7 +210,7 @@ class VM(object):
         old_vm = VM()
         old_vm.__dict__ = self.__dict__
         self.__dict__ = clone.__dict__
-        old_vm.power_off()
+        old_vm.power_off(migrate=True)
 
     def screendump(self, filename, verbose=True):
         """
@@ -233,6 +234,8 @@ class VM(object):
                                                                self.short_id))
         thread_enable = 'avocado.args.virt.screendump_thread_enable'
         self._screendump_thread_enable = self.params.get(thread_enable, True)
+        video_enable = 'avocado.args.virt.video_enable'
+        self._video_enable = self.params.get(video_enable, True)
         if self._screendump_thread_enable:
             self._screendump_terminate = threading.Event()
             self._screendump_thread = threading.Thread(target=self._take_screendumps,
@@ -277,6 +280,16 @@ class VM(object):
             else:
                 self._screendump_terminate.wait(timeout=timeout)
 
-    def _screendump_thread_terminate(self):
+    def _encode_video(self):
+        encoder = video.Encoder(verbose=True)
+        video_file = os.path.join(self.logdir, '%s.webm' % self.short_id)
+        try:
+            encoder.encode(self.screendump_dir, video_file)
+        except video.EncodingError, details:
+            log.debug(details)
+
+    def _screendump_thread_terminate(self, migrate=False):
         if self._screendump_thread_enable:
             self._screendump_terminate.set()
+            if self._video_enable and not migrate:
+                self._encode_video()
