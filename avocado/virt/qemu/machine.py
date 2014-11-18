@@ -103,6 +103,7 @@ class VM(object):
         if self._popen is not None:
             self._qmp.cmd('quit')
             self._popen.wait()
+            self.serial_console.close()
             self._screendump_thread_terminate(migrate=migrate)
             self._popen = None
             if migrate:
