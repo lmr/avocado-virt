@@ -271,6 +271,40 @@ class QemuDeviceNetwork(QemuDevice):
         return self
 
 
+class QemuDeviceUSBBus(QemuDevice):
+
+    """
+    USB device bus.
+    """
+
+    name = 'usb_bus'
+
+    def __init__(self, device_type='piix3-usb-uhci', device_id='usbtest', device_bus='pci.0', device_pci_addr='05'):
+        QemuDevice.__init__(self)
+        self.device_type = device_type
+        self.device_id = device_id
+        self.device_bus = device_bus
+        self.device_pci_addr = device_pci_addr
+        self._args = ['-device {self.device_type},id={self.device_id},bus={self.device_bus},addr={self.device_pci_addr}']
+
+
+class QemuDeviceUSB(QemuDevice):
+
+    """
+    USB device.
+    """
+
+    name = 'usb'
+
+    def __init__(self, device_type='usb-tablet', device_id='usb-tablet1', device_bus='usbtest.0', device_usb_port=1):
+        QemuDevice.__init__(self)
+        self.device_type = device_type
+        self.device_id = device_id
+        self.device_bus = device_bus
+        self.device_usb_port = device_usb_port
+        self._args = ['-device {self.device_type},id={self.device_id},bus={self.device_bus},port={self.device_usb_port}']
+
+
 class QemuDeviceIncoming(QemuDevice):
 
     """
@@ -399,3 +433,11 @@ class QemuDevices(object):
             msg = 'Migration %s still unsupported' % protocol
             raise UnsupportedMigrationProtocol(msg)
         return self.ports.migration_tcp_port
+
+    def add_usb_bus(self, device_type='piix3-usb-uhci', device_id='usbtest', device_bus='pci.0', device_pci_addr='05'):
+        self.add_device('usb_bus', device_type=device_type, device_id=device_id, device_bus=device_bus,
+                        device_pci_addr=device_pci_addr)
+
+    def add_usb(self, device_type='usb-tablet', device_id='usb-tablet1', device_bus='usbtest.0', device_usb_port=1):
+        self.add_device('usb', device_type=device_type, device_id=device_id, device_bus=device_bus,
+                        device_usb_port=device_usb_port)
